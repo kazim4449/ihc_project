@@ -1,0 +1,41 @@
+# file name: Dockerfile
+# Use the official NVIDIA CUDA base image
+FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+
+#Sets the working directory for any instructions that follow it in the Dockerfile
+WORKDIR /user/source
+
+# Create necessary directories
+RUN mkdir -p /user/source/data/images_HnE/train
+RUN mkdir -p /user/source/data/masks/train
+RUN mkdir -p /user/source/data/images_HnE/test
+RUN mkdir -p /user/source/data/masks/test
+RUN mkdir -p /user/source/models
+RUN mkdir -p /user/source/environment
+
+# Copy images and masks from local machine to the container
+COPY Train_Unet.py /user/source
+COPY requirements.txt ./
+COPY data/images_HnE/train /user/source/data/images_HnE/train
+COPY data/masks/train /user/source/data/masks/train
+COPY data/images_HnE/test /user/source/data/images_HnE/test
+COPY data/masks/test /user/source/data/masks/test
+COPY /environment/environment_variables.txt /user/source/environment
+
+# Install Git
+RUN apt-get update && apt-get install -y git
+
+# Install additional dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    && pip3 install --upgrade pip \
+    && pip3 install -r requirements.txt \
+    && pip3 install efficientnet --upgrade \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+#Specifies what command to run within the container.
+CMD ["python3", "/user/source/Train_Unet.py"]

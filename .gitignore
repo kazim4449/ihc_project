@@ -1,0 +1,47 @@
+# Byte-compiled / Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+environment/__pycache__/
+
+venv/
+
+# Python packages
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter notebooks checkpoints (if any)
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Ignore everything in data/
+data/*
+
+# But keep README.md
+!data/README.md
+
+
+# Model outputs
+models/*
+
+# Database / large resources
+resources/*
+
+# Docker-related files
+environment/*.pid
+environment/*.sock
+
+# Misc temporary files
+*.tmp
+*.bak
+*.swp

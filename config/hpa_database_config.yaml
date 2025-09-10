@@ -1,0 +1,15 @@
+include: base_config.yaml
+
+paths:
+  tsv_file: "${paths.resources}/normal_expression_Skin_Any.tsv"
+  database_path: "${paths.resources}/final.db"
+  roi_images_path: "${paths.data_root}/images_HnE"
+  inv_images_path: "${paths.data_root}/images_inv"
+  roi_xy_path: "${paths.data_root}/roi_xy"
+  masks_path: "${paths.data_root}/masks"
+  file_path: ""
+
+colors:
+  fg: "${colors.fg}"
+  bg: "${colors.bg}"
+  activebg: "${colors.active_bg}"
