@@ -346,7 +346,7 @@ def visualize_predictions(model, X_val, y_val, n_samples=3, save_path=None):
 # ----------------------
 class TrainPipeline:
     def __init__(self, config, version="v001", continue_training=False):
-        self.debug = True
+        self.debug = False
         self.config = config
         self.version = version
         self.continue_training = continue_training
