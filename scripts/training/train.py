@@ -226,20 +226,26 @@ def log_training_results(model, history, X_val, y_val, save_path=None):
         ])
 
         precisions, recalls, f1s, ious, mccs = [], [], [], [], []
+        from sklearn.metrics import matthews_corrcoef
+
         for i in range(n_classes):
             TP = cm[i, i]
             FN = np.sum(cm[i, :]) - TP
             FP = np.sum(cm[:, i]) - TP
             TN = cm.sum() - (TP + FP + FN)
 
+            # Compute other metrics
             precision_i = TP / (TP + FP + 1e-8)
             recall_i = TP / (TP + FN + 1e-8)
             f1_i = 2 * precision_i * recall_i / (precision_i + recall_i + 1e-8)
             IoU = TP / (TP + FP + FN + 1e-8)
-            numerator = (TP * TN) - (FP * FN)
-            denominator = np.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) + 1e-8
-            mcc_i = numerator / denominator
 
+            # MCC using sklearn (robust)
+            y_true = [1] * TP + [1] * FN + [0] * FP + [0] * TN
+            y_pred = [1] * TP + [0] * FN + [1] * FP + [0] * TN
+            mcc_i = matthews_corrcoef(y_true, y_pred)
+
+            # Append results
             precisions.append(precision_i)
             recalls.append(recall_i)
             f1s.append(f1_i)
