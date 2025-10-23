@@ -25,6 +25,7 @@ from sklearn.metrics import confusion_matrix, classification_report, precision_s
 import seaborn as sns
 
 from .. import config_helper
+from .. import utils
 
 
 # ----------------------
@@ -164,7 +165,7 @@ def log_training_results(model, history, X_val, y_val, save_path=None):
     # ------------------------------
     # Predictions & Visualization
     # ------------------------------
-    visualize_predictions(model, X_val, y_val, n_samples=3, save_path=pred_dir)
+    utils.visualize_predictions(model, X_val, y_val, n_samples=3, save_path=pred_dir)
 
     # ------------------------------
     # Full Evaluation Metrics
@@ -270,82 +271,6 @@ def log_training_results(model, history, X_val, y_val, save_path=None):
     print(f"Unified metrics (per-class + mean) saved to: {metrics_csv}")
 
 
-def visualize_predictions(model, X_val, y_val, n_samples=3, save_path=None):
-    n_samples = min(n_samples, X_val.shape[0])  # avoid out-of-bounds
-    n_classes = y_val.shape[-1] if y_val.ndim == 4 else len(np.unique(y_val))
-    preds = model.predict(X_val)
-    preds_labels = np.argmax(preds, axis=-1)
-    y_val_labels = np.argmax(y_val, axis=-1) if y_val.ndim == 4 else y_val
-
-    plt.figure(figsize=(12, n_samples * 4))
-    for i in range(n_samples):
-        img = X_val[i].astype(np.uint8)
-        true_mask = y_val_labels[i]
-        pred_mask = preds_labels[i]
-
-        # Display images
-        plt.subplot(n_samples, 3, i*3+1)
-        plt.imshow(img)
-        plt.title("Image")
-        plt.axis('off')
-
-        plt.subplot(n_samples, 3, i*3+2)
-        plt.imshow(true_mask)
-        plt.title("Ground Truth")
-        plt.axis('off')
-
-        plt.subplot(n_samples, 3, i*3+3)
-        plt.imshow(pred_mask)
-        plt.title("Prediction")
-        plt.axis('off')
-
-        # Flatten masks for metrics
-        true_flat = true_mask.flatten()
-        pred_flat = pred_mask.flatten()
-
-        # Per-class metrics
-        cm = confusion_matrix(true_flat, pred_flat, labels=list(range(n_classes)))
-        precision = precision_score(true_flat, pred_flat, average='weighted', zero_division=0)
-        recall = recall_score(true_flat, pred_flat, average='weighted', zero_division=0)
-        f1 = f1_score(true_flat, pred_flat, average='weighted', zero_division=0)
-
-        # Per-class IOU using keras MeanIoU
-        IOU_keras = tf.keras.metrics.MeanIoU(num_classes=n_classes)
-        IOU_keras.update_state(true_mask, pred_mask)
-        iou_matrix = np.array(IOU_keras.get_weights()).reshape(n_classes, n_classes)
-        per_class_iou = [iou_matrix[i,i] / (np.sum(iou_matrix[i,:]) + 1e-8) for i in range(n_classes)]
-
-        # Save metrics and confusion matrices for each sample
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
-            metrics_file = os.path.join(save_path, f"sample_{i}_metrics.txt")
-            with open(metrics_file, "w") as f:
-                f.write(f"Weighted Precision: {precision:.4f}\n")
-                f.write(f"Weighted Recall: {recall:.4f}\n")
-                f.write(f"Weighted F1: {f1:.4f}\n")
-                f.write(f"Per-class IOU:\n")
-                for c, iou_val in enumerate(per_class_iou):
-                    f.write(f"Class {c}: {iou_val:.4f}\n")
-
-            cm_file = os.path.join(save_path, f"sample_{i}_confusion_matrix.png")
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-                        xticklabels=[f"Class {i}" for i in range(n_classes)],
-                        yticklabels=[f"Class {i}" for i in range(n_classes)])
-            plt.title(f"Sample {i} Confusion Matrix")
-            plt.xlabel("Predicted"); plt.ylabel("True")
-            plt.savefig(cm_file)
-            plt.close()
-
-    plt.tight_layout()
-    if save_path:
-        pred_fig_path = os.path.join(save_path, "sample_predictions.png")
-        plt.savefig(pred_fig_path)
-        print(f"Sample predictions saved to {pred_fig_path}")
-    plt.close()
-
-
-
 
 # ----------------------
 # Training Pipeline
@@ -357,14 +282,48 @@ class TrainPipeline:
         self.version = version
         self.continue_training = continue_training
 
-        # Versioned paths
-        self.train_images_path = os.path.join(config['paths']['training_data'], version, "images", "train")
-        self.train_masks_path = os.path.join(config['paths']['training_data'], version, "masks", "train")
-        self.test_images_path = os.path.join(config['paths']['training_data'], version, "images", "test")
-        self.test_masks_path = os.path.join(config['paths']['training_data'], version, "masks", "test")
+        # Determine continued version suffix and previous model path
+        self.cont_suffix = ""
+        self.prev_model_path = None
 
-        self.model_path = os.path.join(config['paths']['models'], f"{config['training_params']['model_type']}_{version}")
+        model_root = config['paths']['models']
+        base_prefix = f"{config['training_params']['model_type']}_{version}"
+
+        if continue_training:
+            # Find existing model folders for this version
+            existing = sorted([d for d in os.listdir(model_root) if d.startswith(base_prefix)])
+            cont_nums = [int(d.split("_cont")[-1]) for d in existing if "_cont" in d]
+
+            # Compute next continuation number
+            next_num = (max(cont_nums) + 1) if cont_nums else 1
+            self.cont_suffix = f"_cont{next_num}"
+
+            # Set previous model path (latest folder before this one)
+            if cont_nums:
+                last_cont = max(cont_nums)
+                prev_folder = f"{base_prefix}_cont{last_cont}"
+            elif any(d == base_prefix for d in existing):
+                prev_folder = base_prefix  # Continue from base model
+            else:
+                prev_folder = None
+
+            if prev_folder:
+                self.prev_model_path = os.path.join(model_root, prev_folder)
+        else:
+            self.prev_model_path = None
+
+        # Model output path (save new model here)
+        self.model_path = os.path.join(model_root, f"{base_prefix}{self.cont_suffix}")
         os.makedirs(self.model_path, exist_ok=True)
+        # Versioned training paths
+        base = os.path.join(config['paths']['data_root'], version, "training")
+        if continue_training:
+            base = os.path.join(config['paths']['data_root'], version, f"continue_training{self.cont_suffix[-1]}")
+
+        self.train_images_path = os.path.join(base, "images", "train")
+        self.train_masks_path = os.path.join(base, "masks", "train")
+        self.test_images_path = os.path.join(base, "images", "test")
+        self.test_masks_path = os.path.join(base, "masks", "test")
 
         self.n_classes = config['training_params']['n_classes']
         self.activation = config['training_params']['activation']
@@ -374,6 +333,11 @@ class TrainPipeline:
         self.model_type = config['training_params']['model_type']
         self.learning_rate = config['training_params'].get('learning_rate', 1e-4)
 
+        if continue_training:
+            print(f"🔁 Continuing training from: {self.prev_model_path}")
+            print(f"💾 Saving continued model to: {self.model_path}")
+        else:
+            print(f"🆕 Starting new training at: {self.model_path}")
     def load_images_and_masks(self, images_dir, masks_dir):
         image_files = sorted(os.listdir(images_dir))
         mask_files = sorted(os.listdir(masks_dir))
@@ -442,17 +406,22 @@ class TrainPipeline:
         # Determine initial_epoch and load/build model
         initial_epoch = 0
         if self.continue_training:
-            keras_files = [f for f in os.listdir(self.model_path) if f.endswith('.keras')]
-            if len(keras_files) == 1:
-                model = tf.keras.models.load_model(os.path.join(self.model_path, keras_files[0]), compile=False)
-                print(f"Loaded model from {keras_files[0]}")
-                if os.path.exists(history_file):
-                    with open(history_file, 'r') as f:
-                        json_history = json.load(f)
-                    initial_epoch = len(json_history.get('loss', []))
-                    print(f"Resuming from epoch {initial_epoch}")
+            if self.prev_model_path and os.path.exists(self.prev_model_path):
+                keras_files = [f for f in os.listdir(self.prev_model_path) if f.endswith('.keras')]
+                if keras_files:
+                    latest_model = sorted(keras_files)[-1]  # pick last one if multiple
+                    model = tf.keras.models.load_model(os.path.join(self.prev_model_path, latest_model), compile=False)
+                    print(f"✅ Loaded model from previous path: {latest_model}")
+                    if os.path.exists(os.path.join(self.prev_model_path, 'training_history.json')):
+                        with open(os.path.join(self.prev_model_path, 'training_history.json'), 'r') as f:
+                            json_history = json.load(f)
+                        initial_epoch = len(json_history.get('loss', []))
+                        print(f"Resuming from epoch {initial_epoch}")
+                else:
+                    print(f"⚠️ No .keras file found in {self.prev_model_path}, starting fresh.")
+                    model = self.build_model(dropout_rate=params.get("dropout_rate", 0.0))
             else:
-                print("No single model found, starting from scratch.")
+                print("⚠️ No previous model found, starting from scratch.")
                 model = self.build_model(dropout_rate=params.get("dropout_rate", 0.0))
         else:
             model = self.build_model(dropout_rate=params.get("dropout_rate", 0.0))
@@ -601,3 +570,4 @@ if __name__ == "__main__":
         trainer.train_with_optuna_params()
     else:
         trainer.train_model()
+

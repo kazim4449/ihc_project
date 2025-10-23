@@ -2,8 +2,6 @@ paths:
   data_root: "./data"
   raw_data: "${paths.data_root}/raw"
   processed_data: "${paths.data_root}/processed"
-  training_data: "${paths.data_root}"
-  prediction_data: "${paths.data_root}"
   environment_assets: "./environment/assets"
   resources: "./resources"   # for db/tsv/etc
   models: "./models"

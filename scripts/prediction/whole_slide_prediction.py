@@ -137,12 +137,14 @@ def main(config, version="v001"):
     cur = conn.cursor()
 
     # Versioned folders for outputs and last_processed_id
-    output_vis_dir = os.path.join(config['paths']['prediction_data'], version, "outputs_visualization")
-    output_masks_dir = os.path.join(config['paths']['prediction_data'], version, "outputs_masks")
+    base_pred_dir = os.path.join(config['paths']['data_root'], version, "predictions")
+
+    output_vis_dir = os.path.join(base_pred_dir, "outputs_visualization")
+    output_masks_dir = os.path.join(base_pred_dir, "outputs_masks")
     os.makedirs(output_vis_dir, exist_ok=True)
     os.makedirs(output_masks_dir, exist_ok=True)
 
-    last_id_file = os.path.join(config['paths']['prediction_data'], version, "last_processed_id.txt")
+    last_id_file = os.path.join(base_pred_dir, "last_processed_id.txt")
     last_id = load_last_processed_id(last_id_file)
 
     # Fetch rows to process
