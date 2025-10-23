@@ -26,6 +26,10 @@ import cv2
 from skimage.morphology import label as sk_label
 from tensorflow.keras.models import load_model
 import segmentation_models as sm
+from tkinter import Tk, filedialog
+from datetime import datetime
+from pathlib import Path
+
 
 from .. import config_helper
 
@@ -123,21 +127,39 @@ def main(config, version="v001"):
     target_size = (512, 512)
     backbone = config['training_params']['model_type']
 
-    # Load model matching version
-    model_dir = os.path.join(config['paths']['models'], f"{backbone}_{version}")
-    model_files = [f for f in os.listdir(model_dir) if f.endswith('.keras')]
-    if len(model_files) != 1:
-        raise ValueError(f"Expected one .keras model in {model_dir}, found {len(model_files)}")
-    model_file = os.path.join(model_dir, model_files[0])
+    # --- File picker for model selection ---
+    Tk().withdraw()  # Hide the root Tkinter window
+    print(f"📂 Please select the .keras model file to use for prediction...")
+    initial_dir = os.path.join(config['paths']['models'], f"{backbone}_{version}")
+    model_file = filedialog.askopenfilename(
+        title="Select Keras Model",
+        initialdir=initial_dir,
+        filetypes=[("Keras Model Files", "*.keras")]
+    )
+
+    if not model_file:
+        raise ValueError("❌ No model file selected. Aborting prediction.")
+
     model = load_model(model_file, compile=False)
-    print(f"Loaded model: {model_file}")
+    print(f"✅ Loaded model: {model_file}")
+
+    # --- Save metadata for reproducibility ---
+    model_name = Path(model_file).stem
+    base_pred_dir = os.path.join(config['paths']['data_root'], version, "predictions", model_name)
+    os.makedirs(base_pred_dir, exist_ok=True)
+
+    metadata = {
+        "model_file": model_file,
+        "model_name": model_name,
+        "version": version,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    with open(os.path.join(base_pred_dir, "metadata.json"), "w") as f:
+        json.dump(metadata, f, indent=2)
 
     # Connect to database
     conn = create_connection(config['paths']['database_path'])
     cur = conn.cursor()
-
-    # Versioned folders for outputs and last_processed_id
-    base_pred_dir = os.path.join(config['paths']['data_root'], version, "predictions")
 
     output_vis_dir = os.path.join(base_pred_dir, "outputs_visualization")
     output_masks_dir = os.path.join(base_pred_dir, "outputs_masks")

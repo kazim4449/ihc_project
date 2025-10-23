@@ -449,9 +449,18 @@ class TrainPipeline:
             epochs_path = os.path.join(self.model_path, "epochs")
             os.makedirs(epochs_path, exist_ok=True)
 
+            # Identify continuation suffix for naming
+            cont_suffix = ""
+            if self.continue_training:
+                # Try to detect continuation index from path, e.g. ".../unet_v001_cont2"
+                match = re.search(r'_cont(\d+)$', self.model_path)
+                cont_suffix = f"_cont{match.group(1)}" if match else "_cont"
+
+            best_model_filename = f"best_model_{self.model_type}{cont_suffix}.keras"
+            
             # Save best model
             callbacks.append(tf.keras.callbacks.ModelCheckpoint(
-                filepath=os.path.join(self.model_path, f"best_model_{self.model_type}.keras"),
+                filepath=os.path.join(self.model_path, best_model_filename),
                 monitor='val_loss',
                 save_best_only=True,
                 save_weights_only=False,
@@ -463,7 +472,7 @@ class TrainPipeline:
             callbacks.append(tf.keras.callbacks.ModelCheckpoint(
                 filepath=os.path.join(
                     epochs_path,
-                    f"{self.model_type}_epoch{{epoch:02d}}_val{{val_loss:.4f}}.keras"
+                    f"{self.model_type}_epoch{{epoch:02d}}_val{{val_loss:.4f}}{cont_suffix}.keras"
                 ),
                 save_freq='epoch',
                 save_weights_only=False,
