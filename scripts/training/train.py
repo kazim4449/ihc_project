@@ -276,7 +276,7 @@ def log_training_results(model, history, X_val, y_val, save_path=None):
 # Training Pipeline
 # ----------------------
 class TrainPipeline:
-    def __init__(self, config, version="v001", continue_training=False):
+    def __init__(self, config, version="v001", continue_training=False, reuse_last=False):
         self.debug = False
         self.config = config
         self.version = version
@@ -290,23 +290,26 @@ class TrainPipeline:
         base_prefix = f"{config['training_params']['model_type']}_{version}"
 
         if continue_training:
-            # Find existing model folders for this version
             existing = sorted([d for d in os.listdir(model_root) if d.startswith(base_prefix)])
             cont_nums = [int(d.split("_cont")[-1]) for d in existing if "_cont" in d]
 
-            # Compute next continuation number
-            next_num = (max(cont_nums) + 1) if cont_nums else 1
-            self.cont_suffix = f"_cont{next_num}"
-
-            # Set previous model path (latest folder before this one)
             if cont_nums:
                 last_cont = max(cont_nums)
                 prev_folder = f"{base_prefix}_cont{last_cont}"
             elif any(d == base_prefix for d in existing):
-                prev_folder = base_prefix  # Continue from base model
+                prev_folder = base_prefix
+                last_cont = 0
             else:
                 prev_folder = None
+                last_cont = 0
 
+            # 🔹 If we’re reusing (optuna-load), don’t increment
+            if reuse_last:
+                next_num = last_cont
+            else:
+                next_num = last_cont + 1
+
+            self.cont_suffix = f"_cont{next_num}" if next_num > 0 else ""
             if prev_folder:
                 self.prev_model_path = os.path.join(model_root, prev_folder)
         else:
@@ -457,7 +460,7 @@ class TrainPipeline:
                 cont_suffix = f"_cont{match.group(1)}" if match else "_cont"
 
             best_model_filename = f"best_model_{self.model_type}{cont_suffix}.keras"
-            
+
             # Save best model
             callbacks.append(tf.keras.callbacks.ModelCheckpoint(
                 filepath=os.path.join(self.model_path, best_model_filename),
@@ -571,12 +574,15 @@ if __name__ == "__main__":
     train_path = os.path.join(PROJECT_ROOT, "config", "training_config.yaml")
     config = config_helper.ConfigLoader.load_config(base_path, train_path)
 
-    trainer = TrainPipeline(config, version=args.version, continue_training=args.continue_training)
+    #trainer = TrainPipeline(config, version=args.version, continue_training=args.continue_training)
 
-    if args.optuna:
-        trainer.optimize_hyperparameters()
-    elif args.optuna_load:
+    if args.optuna_load:
+        trainer = TrainPipeline(config, version=args.version, continue_training=args.continue_training, reuse_last=True)
         trainer.train_with_optuna_params()
+    elif args.optuna:
+        trainer = TrainPipeline(config, version=args.version, continue_training=args.continue_training, reuse_last=False)
+        trainer.optimize_hyperparameters()
     else:
+        trainer = TrainPipeline(config, version=args.version, continue_training=args.continue_training)
         trainer.train_model()
 
