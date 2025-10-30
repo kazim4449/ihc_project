@@ -295,29 +295,37 @@ class TrainPipeline:
 
             if cont_nums:
                 last_cont = max(cont_nums)
-                prev_folder = f"{base_prefix}_cont{last_cont}"
-            elif any(d == base_prefix for d in existing):
-                prev_folder = base_prefix
+            else:
                 last_cont = 0
+
+            # 🔹 Decide current continuation number
+            if reuse_last:
+                next_num = last_cont  # Reuse existing latest folder
+            else:
+                next_num = last_cont + 1  # Create new continuation
+
+            # Current model folder
+            self.cont_suffix = f"_cont{next_num}" if next_num > 0 else ""
+
+            # 🔹 Determine previous model folder (always one before)
+            if next_num > 1:
+                prev_folder = f"{base_prefix}_cont{next_num - 1}"
+            elif next_num == 1:
+                prev_folder = base_prefix
             else:
                 prev_folder = None
-                last_cont = 0
 
-            # 🔹 If we’re reusing (optuna-load), don’t increment
-            if reuse_last:
-                next_num = last_cont
-            else:
-                next_num = last_cont + 1
-
-            self.cont_suffix = f"_cont{next_num}" if next_num > 0 else ""
+            # Set paths
             if prev_folder:
                 self.prev_model_path = os.path.join(model_root, prev_folder)
+            self.model_path = os.path.join(model_root, f"{base_prefix}{self.cont_suffix}")
+
         else:
             self.prev_model_path = None
+            self.model_path = os.path.join(model_root, base_prefix)
 
-        # Model output path (save new model here)
-        self.model_path = os.path.join(model_root, f"{base_prefix}{self.cont_suffix}")
         os.makedirs(self.model_path, exist_ok=True)
+
         # Versioned training paths
         base = os.path.join(config['paths']['data_root'], version, "training")
         if continue_training:
