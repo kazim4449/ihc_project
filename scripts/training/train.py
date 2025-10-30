@@ -12,6 +12,7 @@ import cv2
 import tensorflow as tf
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.callbacks import ModelCheckpoint
+import re
 
 from sklearn.preprocessing import LabelEncoder
 import segmentation_models as sm
