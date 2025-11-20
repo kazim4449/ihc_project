@@ -11,3 +11,12 @@ paths:
   #outputs_visualization: "${paths.prediction_data}/visualizations" 
   
   #model_path: "${paths.models}"
+
+training_params:
+  BACKBONE: ["resnet34", "resnet152"]
+  model_type: "resnet152"
+  n_classes: 4
+  activation: "softmax"
+  learning_rate: 0.0001
+  batch_size: 3
+  img_size: 512
