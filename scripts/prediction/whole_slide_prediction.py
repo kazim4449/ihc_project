@@ -27,7 +27,7 @@ import json
 from skimage.morphology import label as sk_label
 from tensorflow.keras.models import load_model
 import segmentation_models as sm
-from tkinter import Tk, filedialog
+#from tkinter import Tk, filedialog
 from datetime import datetime
 from pathlib import Path
 
@@ -43,7 +43,7 @@ def create_connection(db_file):
     except sqlite3.Error as e:
         print(f"Error connecting to database: {e}")
         return None
-
+'''
 def correct_mask(mask):
     """Combine epidermis (2) and keratin (3) regions, preserve mixed areas."""
     combined_mask = (mask == 2) | (mask == 3)
@@ -55,17 +55,77 @@ def correct_mask(mask):
             continue
         mask[region] = 1 if np.any(mask[region] == 2) else 0
     return mask
+'''
+def correct_mask(mask, epi_min_area_ratio=0.4): # the higher epi_min_area_ratio, the less it keeps
+    """
+    Preserve epidermis (2) and keratin (3).
+    Merge mixed regions safely.
+    Remove small isolated epidermis components.
+    """
 
-def keep_largest_combined_area(pred_mask):
-    """Keep only the largest connected component in the predicted mask."""
+    # ---- PASS 1: merge epi/ker regions safely ----
+    combined_mask = (mask == 2) | (mask == 3)
+    labeled_array, num_features = sk_label(combined_mask, return_num=True)
+
+    for i in range(1, num_features + 1):
+        region = (labeled_array == i)
+
+        has_epi = np.any(mask[region] == 2)
+        has_ker = np.any(mask[region] == 3)
+
+        if has_epi and has_ker:
+            continue  # mixed → keep both
+
+        if has_epi:
+            mask[region] = 2
+        elif has_ker:
+            mask[region] = 3
+
+    # ---- PASS 2: remove small epidermis-only components ----
+    epi_mask = (mask == 2).astype(np.uint8)
+    epi_labeled, epi_count = sk_label(epi_mask, return_num=True)
+
+    if epi_count <= 1:
+        return mask  # nothing to filter
+
+    epi_areas = [
+        np.sum(epi_labeled == i)
+        for i in range(1, epi_count + 1)
+    ]
+
+    max_area = max(epi_areas)
+
+    for i, area in enumerate(epi_areas, start=1):
+        if area < epi_min_area_ratio * max_area:
+            mask[epi_labeled == i] = 0  # remove small epidermis
+
+    return mask
+
+
+def keep_significant_combined_areas(pred_mask, min_area_ratio=0.1):
+    """
+    Keep all connected components whose area is at least
+    min_area_ratio * largest_component_area.
+    """
     binary_mask = (pred_mask != 0).astype(np.uint8)
-    contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    contours, _ = cv2.findContours(
+        binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
     if not contours:
-        return np.zeros_like(pred_mask)
-    largest_contour = max(contours, key=cv2.contourArea)
-    largest_mask = np.zeros_like(pred_mask, dtype=np.uint8)
-    cv2.drawContours(largest_mask, [largest_contour], -1, 1, thickness=cv2.FILLED)
-    return largest_mask
+        return np.zeros_like(pred_mask, dtype=np.uint8)
+
+    areas = [cv2.contourArea(c) for c in contours]
+    max_area = max(areas)
+
+    keep_mask = np.zeros_like(pred_mask, dtype=np.uint8)
+
+    for contour, area in zip(contours, areas):
+        if area >= min_area_ratio * max_area:
+            cv2.drawContours(keep_mask, [contour], -1, 1, thickness=cv2.FILLED)
+
+    return keep_mask
 
 def crop_and_predict(original_image, predicted_mask, target_size, model, backbone):
     """Crop largest predicted region and re-run prediction for refinement."""
@@ -74,13 +134,39 @@ def crop_and_predict(original_image, predicted_mask, target_size, model, backbon
     if not contours:
         return original_image, predicted_mask
 
-    x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
+    # --- union bounding box over ALL kept components ---
+    xs, ys, xe, ye = [], [], [], []
+
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+        xs.append(x)
+        ys.append(y)
+        xe.append(x + w)
+        ye.append(y + h)
+
+    x = min(xs)
+    y = min(ys)
+    w = max(xe) - x
+    h = max(ye) - y
+    pad = 35  # pixels in mask space #50 is good
+
+    x1 = max(0, x - pad)
+    y1 = max(0, y - pad)
+    x2 = min(predicted_mask.shape[1], x + w + pad)
+    y2 = min(predicted_mask.shape[0], y + h + pad)
+
+    x = x1
+    y = y1
+    w = x2 - x1
+    h = y2 - y1
+
     scale_x = original_image.shape[1] / predicted_mask.shape[1]
     scale_y = original_image.shape[0] / predicted_mask.shape[0]
 
     x_o, y_o, w_o, h_o = int(x * scale_x), int(y * scale_y), int(w * scale_x), int(h * scale_y)
     cropped_image = original_image[y_o:y_o + h_o, x_o:x_o + w_o]
     resized_cropped = cv2.resize(cropped_image, target_size, interpolation=cv2.INTER_NEAREST)
+
 
     input_img = np.expand_dims(resized_cropped, 0)
     input_img = sm.get_preprocessing(backbone)(input_img)
@@ -141,6 +227,9 @@ def process_entry(mainID, gene_name, image_source, model, backbone,
 
     # Predict base mask
     ihc_resized = cv2.resize(ihc_img, target_size, interpolation=cv2.INTER_NEAREST)
+
+    ihc_resized = ihc_resized.astype(np.float32)
+
     input_img = np.expand_dims(ihc_resized, 0)
     input_img = sm.get_preprocessing(backbone)(input_img)
 
@@ -148,7 +237,10 @@ def process_entry(mainID, gene_name, image_source, model, backbone,
     pred_mask = np.argmax(pred_mask, axis=3)[0, :, :]
 
     # Post-processing
-    largest_mask = keep_largest_combined_area(pred_mask)
+    largest_mask = keep_significant_combined_areas(
+        pred_mask,
+        min_area_ratio=0.1
+    )
     cropped_img, combined_mask = crop_and_predict(
         ihc_img, largest_mask, target_size, model, backbone
     )
@@ -169,13 +261,10 @@ def process_entry(mainID, gene_name, image_source, model, backbone,
 
 
 def load_from_folder():
-    Tk().withdraw()
+    folder = input("📁 Enter the path to the folder containing test images: ").strip()
+    if not folder or not os.path.isdir(folder):
+        raise ValueError(f"❌ Folder not found: {folder}")
 
-    print("📁 Select a folder containing test images...")
-    folder = filedialog.askdirectory(title="Select Test Image Folder")
-
-    if not folder:
-        raise ValueError("❌ No folder selected.")
 
     valid_ext = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
     files = [f for f in os.listdir(folder) if f.lower().endswith(valid_ext)]
@@ -213,15 +302,12 @@ def main(config, version="v001"):
     backbone = config['training_params']['model_type']
 
     # --- Model picker ---
-    Tk().withdraw()
-    print("📂 Select the .keras model...")
-    model_file = filedialog.askopenfilename(
-        title="Select Keras Model",
-        initialdir=os.path.join(config['paths']['models'], f"{backbone}_{version}"),
-        filetypes=[("Keras Model Files", "*.keras")]
-    )
-    if not model_file:
-        raise ValueError("❌ No model selected.")
+    model_dir = os.path.join(config['paths']['models'], f"{backbone}_{version}")
+    print(f"📂 Model directory: {model_dir}")
+    model_file = input("Enter the full path to the .keras model file: ").strip()
+
+    if not model_file or not os.path.isfile(model_file):
+        raise ValueError(f"❌ Model file not found: {model_file}")
 
     model = load_model(model_file, compile=False)
     print(f"✅ Loaded model: {model_file}")

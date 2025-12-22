@@ -22,11 +22,12 @@ import sqlite3
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+import json
 
 from skimage.morphology import label as sk_label
 from tensorflow.keras.models import load_model
 import segmentation_models as sm
-from tkinter import Tk, filedialog
+#from tkinter import Tk, filedialog
 from datetime import datetime
 from pathlib import Path
 
@@ -113,12 +114,96 @@ def save_visualization(original, masks, gene_name, mainID, output_dir):
     for i, mask in enumerate(masks):
         plt.subplot(1, 6, i + 1)
         plt.title(titles[i])
-        plt.imshow(mask if i == 0 or i == 3 else mask, cmap='nipy_spectral')
+        if i == 0 or i == 3:
+            # show original or cropped image normally
+            plt.imshow(mask)
+        else:
+            # class mask: no colormap → restore original behavior
+            plt.imshow(mask, vmin=0, vmax=3)
         plt.axis('off')
 
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(os.path.join(output_dir, f"{gene_name}_{mainID}.png"))
     plt.close()
+
+
+def process_entry(mainID, gene_name, image_source, model, backbone,
+                  target_size, output_vis_dir, output_masks_dir):
+    # Load image (file path OR URL)
+    if image_source.startswith("http"):
+        resp = urllib.request.urlopen(image_source)
+        arr = np.asarray(bytearray(resp.read()), dtype=np.uint8)
+        ihc_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    else:
+        ihc_img = cv2.imread(image_source)
+
+    ihc_img = cv2.cvtColor(ihc_img, cv2.COLOR_BGR2RGB)
+
+    # Predict base mask
+    ihc_resized = cv2.resize(ihc_img, target_size, interpolation=cv2.INTER_NEAREST)
+
+    ihc_resized = ihc_resized.astype(np.float32)
+
+    input_img = np.expand_dims(ihc_resized, 0)
+    input_img = sm.get_preprocessing(backbone)(input_img)
+
+    pred_mask = model.predict(input_img)
+    pred_mask = np.argmax(pred_mask, axis=3)[0, :, :]
+
+    # Post-processing
+    largest_mask = keep_largest_combined_area(pred_mask)
+    cropped_img, combined_mask = crop_and_predict(
+        ihc_img, largest_mask, target_size, model, backbone
+    )
+    corrected_mask = correct_mask(combined_mask)
+
+    # Save mask
+    mask_file = os.path.join(output_masks_dir, f"{gene_name}_{mainID}.npz")
+    np.savez_compressed(mask_file, mask=corrected_mask)
+
+    # Save visualization
+    save_visualization(
+        ihc_img,
+        [ihc_img, pred_mask, largest_mask, cropped_img, combined_mask, corrected_mask],
+        gene_name, mainID, output_vis_dir
+    )
+
+    print(f"Processed {gene_name} | ID: {mainID}")
+
+
+def load_from_folder():
+    folder = input("📁 Enter the path to the folder containing test images: ").strip()
+    if not folder or not os.path.isdir(folder):
+        raise ValueError(f"❌ Folder not found: {folder}")
+
+
+    valid_ext = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+    files = [f for f in os.listdir(folder) if f.lower().endswith(valid_ext)]
+
+    if not files:
+        raise ValueError("❌ No valid image files in folder.")
+
+    results = []
+    for idx, filename in enumerate(sorted(files), start=1):
+        stem = Path(filename).stem
+        full_path = os.path.join(folder, filename)
+        results.append((idx, stem, full_path))  # fake mainID, gene_name, path
+
+    print(f"Found {len(results)} images.")
+
+    return results
+def load_from_database(config, last_id):
+    conn = create_connection(config['paths']['database_path'])
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT mainID, name, url FROM elGenes WHERE mainID > ?",
+        (last_id,)
+    )
+    rows = cur.fetchall()
+
+    conn.close()
+    return rows
 
 # ----------------------
 # Main pipeline
@@ -127,92 +212,69 @@ def main(config, version="v001"):
     target_size = (512, 512)
     backbone = config['training_params']['model_type']
 
-    # --- File picker for model selection ---
-    Tk().withdraw()  # Hide the root Tkinter window
-    print(f"📂 Please select the .keras model file to use for prediction...")
-    initial_dir = os.path.join(config['paths']['models'], f"{backbone}_{version}")
-    model_file = filedialog.askopenfilename(
-        title="Select Keras Model",
-        initialdir=initial_dir,
-        filetypes=[("Keras Model Files", "*.keras")]
-    )
+    # --- Model picker ---
+    model_dir = os.path.join(config['paths']['models'], f"{backbone}_{version}")
+    print(f"📂 Model directory: {model_dir}")
+    model_file = input("Enter the full path to the .keras model file: ").strip()
 
-    if not model_file:
-        raise ValueError("❌ No model file selected. Aborting prediction.")
+    if not model_file or not os.path.isfile(model_file):
+        raise ValueError(f"❌ Model file not found: {model_file}")
 
     model = load_model(model_file, compile=False)
     print(f"✅ Loaded model: {model_file}")
 
-    # --- Save metadata for reproducibility ---
+    # Output directories
     model_name = Path(model_file).stem
     base_pred_dir = os.path.join(config['paths']['data_root'], version, "predictions", model_name)
-    os.makedirs(base_pred_dir, exist_ok=True)
-
-    metadata = {
-        "model_file": model_file,
-        "model_name": model_name,
-        "version": version,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    with open(os.path.join(base_pred_dir, "metadata.json"), "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    # Connect to database
-    conn = create_connection(config['paths']['database_path'])
-    cur = conn.cursor()
-
     output_vis_dir = os.path.join(base_pred_dir, "outputs_visualization")
     output_masks_dir = os.path.join(base_pred_dir, "outputs_masks")
     os.makedirs(output_vis_dir, exist_ok=True)
     os.makedirs(output_masks_dir, exist_ok=True)
 
+    # Save metadata
+
+    with open(os.path.join(base_pred_dir, "metadata.json"), "w") as f:
+        json.dump({
+            "model_file": model_file,
+            "model_name": model_name,
+            "version": version,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }, f, indent=2)
+
+    # ------------------------------
+    # ASK USER FOR MODE
+    # ------------------------------
+    print("\nSelect mode:\n1 = Database mode\n2 = Folder test/debug mode\n")
+    mode = input("Enter mode (1/2): ").strip()
+
     last_id_file = os.path.join(base_pred_dir, "last_processed_id.txt")
     last_id = load_last_processed_id(last_id_file)
 
-    # Fetch rows to process
-    cur.execute("SELECT mainID, name, url FROM elGenes WHERE mainID > ?", (last_id,))
-    rows = cur.fetchall()
+    if mode == "1":
+        entries = load_from_database(config, last_id)
+        convert = lambda row: (row[0], row[1], row[2])  # no change
+    else:
+        entries = load_from_folder()
+        convert = lambda row: (row[0], row[1], row[2])  # already (id, name, path)
 
-    for mainID, gene_name, url in rows:
+    # ------------------------------
+    # PROCESS LOOP
+    # ------------------------------
+    for mainID, gene_name, src in entries:
         try:
-            # Load image from URL
-            resp = urllib.request.urlopen(url)
-            arr = np.asarray(bytearray(resp.read()), dtype=np.uint8)
-            ihc_img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            ihc_img = cv2.cvtColor(ihc_img, cv2.COLOR_BGR2RGB)
-
-            # Resize & preprocess
-            ihc_resized = cv2.resize(ihc_img, target_size, interpolation=cv2.INTER_NEAREST)
-            input_img = np.expand_dims(ihc_resized, 0)
-            input_img = sm.get_preprocessing(backbone)(input_img)
-
-            # Predict mask
-            pred_mask = model.predict(input_img)
-            pred_mask = np.argmax(pred_mask, axis=3)[0, :, :]
-
-            # Post-processing
-            largest_mask = keep_largest_combined_area(pred_mask)
-            cropped_img, combined_mask = crop_and_predict(ihc_img, largest_mask, target_size, model, backbone)
-            corrected_mask = correct_mask(combined_mask)
-
-            # Save mask
-            mask_filename = f"{gene_name}_{mainID}.npz"
-            np.savez_compressed(os.path.join(output_masks_dir, mask_filename), mask=corrected_mask)
-
-            # Save visualization
-            save_visualization(ihc_img,
-                               [ihc_img, pred_mask, largest_mask, cropped_img, combined_mask, corrected_mask],
-                               gene_name, mainID, output_vis_dir)
-
-            # Update last processed ID
+            process_entry(
+                mainID, gene_name, src,
+                model, backbone,
+                target_size,
+                output_vis_dir, output_masks_dir
+            )
             save_last_processed_id(mainID, last_id_file)
-            print(f"Processed {gene_name} | ID: {mainID}")
 
         except Exception as e:
-            print(f"Error processing {gene_name} | ID {mainID}: {e}")
+            print(f"❌ Error processing {gene_name} (ID {mainID}): {e}")
 
-    conn.close()
-    print("Whole-slide prediction completed.")
+    print("Prediction completed.")
+
 
 # ----------------------
 # Entry point
