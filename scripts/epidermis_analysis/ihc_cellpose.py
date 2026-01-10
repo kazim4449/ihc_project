@@ -1,563 +1,362 @@
-'''
+"""
 Stringer, C., Wang, T., Michaelos, M., & Pachitariu, M. (2021).
-Cellpose: a generalist algorithm for cellular segmentation. Nature methods,
-18(1), 100-106.
+Cellpose: a generalist algorithm for cellular segmentation.
+Nature Methods, 18(1), 100–106.
 
-S. Di Cataldo, E. Ficarra, A. Acquaviva, E. Macii (2010).
-Automated segmentation of tissue images for computerized IHC analysis,
+Di Cataldo, S., Ficarra, E., Acquaviva, A., & Macii, E. (2010).
+Automated segmentation of tissue images for computerized IHC analysis.
 https://doi.org/10.1016/j.cmpb.2010.02.002
-'''
+"""
 
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
-import cv2
-
-from skimage import data, io, img_as_ubyte
-from skimage.color import rgb2hed, hed2rgb
-from skimage.exposure import rescale_intensity
-from skimage.measure import regionprops_table
-
-from cellpose import models
-from cellpose import utils
-
-import pandas as pd
 import os
-import argparse
 import json
+import argparse
 import sqlite3
 import urllib.request
-
-from scipy.spatial.distance import cdist
-from scipy import ndimage
-from scipy.ndimage import sobel
-
-class cellpose():
-	def __init__(self, args):
-
-		'''CARE: download_H_img_EQ is a workaround, be aware of current status'''
-		super().__init__()
-
-		self.database_path = args.database_path
-		self.images_ihc_path = args.images_ihc_path
-		self.masks_ihc_path = args.masks_ihc_path
-		self.masks_ihc_cells_path = args.masks_ihc_cells_path
-
-		self.model_path = args.model_path
-
-		self.gpu_usage = True
-		self.main_model = 'cellpose'	# 'cellpose', 'stardist', 'staining' ('staining' is not deepL model)
-		self.model_type = 'cyto2'  # 'cyto' for cytoplasmic masks, 'nuclei' for nuclear masks; 'cyto2'
-
-		self.model_channels = [0, 0]	# [0,0] grayscale input [cyco, nuclei]
-										# 0=grayscale, 1=red, 2=green, 3=blue
-
-	def save_last_processed_id(self, last_processed_id, filename):
-		with open(filename, 'w') as file:
-			file.write(str(last_processed_id))
-
-	def load_last_processed_id(self, filename):
-		try:
-			with open(filename, 'r') as file:
-				last_processed_id = int(file.read())
-				return last_processed_id
-		except FileNotFoundError:
-			return 0
-	# Separate the individual stains from the IHC image
-
-	def color_separate(self, ihc_rgb):
-
-		# Convert the RGB image to HED using the prebuilt skimage method
-		ihc_hed = rgb2hed(ihc_rgb)
-
-		# Create an RGB image for each of the separated stains
-		# Convert them to ubyte for easy saving to drive as an image
-		null = np.zeros_like(ihc_hed[:, :, 0])
-		ihc_h = img_as_ubyte(hed2rgb(np.stack((ihc_hed[:, :, 0], null, null), axis=-1)))
-		ihc_d = img_as_ubyte(hed2rgb(np.stack((null, null, ihc_hed[:, :, 2]), axis=-1)))
-
-		return (ihc_h, ihc_d)
-
-
-	def create_stain_mask(self, H_img, D_img, mask_cropped):
-		print(mask_cropped.shape, 'mask')
-		print(H_img.shape, 'H_img')
-
-		img = H_img
-		img2 = D_img
-		stain_mask_list = []
-		# for i in range(2):
-		# 	if i == 0:
-		# 		H_cells = np.copy(img)
-		# 		D_cells = np.copy(img2)
-		#
-		# 		H_cells[mask_cropped == 0] = 0  # convert every pixel to black which is 0
-		# 		D_cells[mask_cropped == 0] = 0
-		#
-		# 		H_img = H_cells
-		# 		D_img = D_cells
-		#
-		# 	elif i == 1:
-		# 		H_not_cells = np.copy(img)
-		# 		D_not_cells = np.copy(img2)
-		#
-		# 		# Extraction of cells/cyto
-		# 		H_not_cells[mask_cropped > 0] = 0  # convert every pixel to black which is greater 0
-		# 		D_not_cells[mask_cropped > 0] = 0
-		#
-		# 		H_img = H_not_cells
-		# 		D_img = D_not_cells
-
-		def calculate_histogram(image):
-			hist = cv2.calcHist([image], [0], None, [256], [0, 255])
-			return hist
-
-		def normalize_histogram(hist):
-			return hist / np.sum(hist)
-			#return hist / hist.sum()
-
-		def determine_threshold(hist_h, hist_d):
-			# Find the point of maximum difference between the histograms
-			diff = np.abs(hist_h - hist_d)
-			threshold = np.argmax(diff)
-			return threshold
-
-		def classify_pixels(image_h, image_d, threshold):
-			rows, cols = image_h.shape[:2]
-			result_image = np.zeros((rows, cols, 3), dtype=np.uint8)
-			print(threshold)
-
-			for i in range(rows):
-				for j in range(cols):
-					intensity_h = image_h[i, j]
-					intensity_d = image_d[i, j]
-					# Create blue mask for H > D
-					if intensity_h > intensity_d + threshold:
-						result_image[i, j] = [intensity_h, 0, 0]
-					# Create brown mask for D > H
-					elif intensity_d > intensity_h + threshold:
-						result_image[i, j] = [0, 0, intensity_d]
-					else:
-						# Assign the pixel to the image with higher intensity
-						if intensity_h < intensity_d:
-							result_image[i, j] = [intensity_h, 0, 0]  # Blue mask
-						else:
-							result_image[i, j] = [0, 0, intensity_d]  # Brown mask
-
-			return result_image
-		'''
-		https://pyimagesearch.com/2021/04/28/opencv-image-histograms-cv2-calchist/
-		OpenCV Histogram ...
-		'''
-
-		# Convert to grayscale
-		image_h_gray = cv2.cvtColor(H_img, cv2.COLOR_BGR2GRAY)
-		image_d_gray = cv2.cvtColor(D_img, cv2.COLOR_BGR2GRAY)
-
-		# Compute histograms
-		hist_h = calculate_histogram(image_h_gray)
-		hist_d = calculate_histogram(image_d_gray)
-
-		# Normalize histograms
-		norm_hist_h = normalize_histogram(hist_h)
-		norm_hist_d = normalize_histogram(hist_d)
-
-		# plot the histogram
-		plt.figure()
-		plt.title("Grayscale Histogram H")
-		plt.xlabel("Bins")
-		plt.ylabel("Number of Pixels")
-		plt.plot(hist_h)
-		plt.xlim([0, 256])
-
-		# plot the histogram
-		plt.figure()
-		plt.title("Grayscale Histogram D")
-		plt.xlabel("Bins")
-		plt.ylabel("Number of Pixels")
-		plt.plot(hist_d)
-		plt.xlim([0, 256])
-		#plt.show()
-
-		# Determine threshold
-		threshold = determine_threshold(norm_hist_h, norm_hist_d)
-
-		image_h_gray = np.invert(image_h_gray)
-		image_d_gray = np.invert(image_d_gray)
-		# image_h_gray = cv2.equalizeHist(image_h_gray)
-		# image_d_gray = cv2.equalizeHist(image_d_gray)
-
-		plt.figure()
-		plt.axis("off")
-		plt.title("H")
-		plt.imshow(cv2.cvtColor(image_h_gray, cv2.COLOR_GRAY2RGB))
-
-		plt.figure()
-		plt.axis("off")
-		plt.title("d")
-		plt.imshow(cv2.cvtColor(image_d_gray, cv2.COLOR_GRAY2RGB))
-
-
-		# Classify pixels
-		stain_mask = classify_pixels(image_h_gray, image_d_gray, threshold)
-
-		#
-		# # Create mask for blue pixels where H_img is brighter
-		# blue_mask = H_img > D_img
-		# blue_color = np.stack([np.zeros_like(H_img), np.zeros_like(H_img), H_img * blue_mask], axis=-1)
-		#
-		# # Create mask for brown pixels where D_img is brighter
-		# brown_mask = ~blue_mask
-		# brown_color = np.stack([D_img * brown_mask, np.zeros_like(H_img), np.zeros_like(H_img)], axis=-1)
-		#
-		# # Create mask for pixels with brightness 0,0,0
-		# black_mask = (H_img == 0) & (D_img == 0)
-		# class_0_color = np.zeros_like(H_img)
-		#
-		# # Initialize stain_mask with a transparent background
-		# stain_mask = np.zeros_like(blue_color, dtype=np.uint8)
-		#
-		# # Fill the stain_mask with colors based on blue, brown, and class 0 masks
-		# stain_mask[blue_mask] = blue_color[blue_mask]
-		# stain_mask[brown_mask] = brown_color[brown_mask]
-		#
-		# # Assign class 0 color only to pixels where the black_mask is True
-		# stain_mask[..., 0][black_mask] = class_0_color[black_mask]
-		# stain_mask[..., 1][black_mask] = class_0_color[black_mask]
-		# stain_mask[..., 2][black_mask] = class_0_color[black_mask]
-
-
-
-		combined_stain_mask = stain_mask
-		# stain_mask_list.append(stain_mask)
-		#
-		# # Combine both masks
-		# combined_stain_mask = stain_mask_list[0] | stain_mask_list[1]
-
-
-
-		# Create Contours for each unique component of cell mask
-		mask_cropped = mask_cropped.astype(np.uint8)
-
-		# Create an empty image to draw contours
-		contour_image = np.zeros_like(mask_cropped)
-
-		# Get unique values in the mask
-		unique_values = np.unique(mask_cropped)
-
-		# Iterate through unique values
-		for value in unique_values:
-			# Create a binary mask for the current value
-			component_mask = np.uint8(mask_cropped == value)
-
-			# Find contours for the current component
-			contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-			# Draw a filled contour for each pixel
-			for contour in contours:
-				# Generate a random color for each contour
-				color = tuple(map(int, np.random.randint(0, 255, size=(3,))))
-				cv2.drawContours(combined_stain_mask, [contour], -1, color, thickness=2)
-
-		return combined_stain_mask
-
-	def download_H_img_EQ(self, img, mask, mask_filename):
-		# Extraction of Epidermis
-		extracted_area = np.copy(img)
-		extracted_area[mask != 2] = 255  # convert every pixel to white which isn`t 2 (Epidermis)
-
-
-		H, D = self.color_separate(extracted_area)
-
-		H_img = np.invert(H[:, :, 2])
-		#D_img = np.invert(D[:, :, 2])
-
-		# H_img = cv2.cvtColor(H[:, :, :3], cv2.COLOR_BGR2GRAY)
-		# D_img = cv2.cvtColor(D[:, :, :3], cv2.COLOR_BGR2GRAY)
-
-		# Example of histogram equalization using OpenCV
-		# https://docs.opencv.org/4.x/d5/daf/tutorial_py_histogram_equalization.html
-		H_img_EQ = cv2.equalizeHist(H_img)
-		# D_img_EQ = cv2.equalizeHist(D_img)
-
-		'''Save H_img to use the images for cellpose algorithm on GPU Cluster HPC'''
-		save_dir = 'data/images_H_img_EQ/'
-
-		valid_extensions = ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']
-		if not any(mask_filename.endswith(ext) for ext in valid_extensions):
-			mask_filename += '.png'  # Standard auf .png setzen
-
-		file_path = os.path.join(save_dir, mask_filename)
-
-		success = cv2.imwrite(file_path, H_img_EQ)
-
-		if success:
-			print(f"H_img saved {file_path}.")
-		else:
-			print(f"Error saving {file_path}.")
-
-		return
-		''''''
-
-	def crop_image(self, H_img_EQ, mask, model, mask_filename):
-
-		# Extraction of Epidermis
-		extracted_area = np.copy(H_img_EQ)
-		#extracted_area[mask != 2] = 255  # convert every pixel to white which isn`t 2 (Epidermis)
-
-		# Convert the predicted_mask to uint8 type for findContours
-		mask_uint8 = (mask == 2).astype(np.uint8)
-
-		# Find contours in the mask
-		contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-		H = None
-		D = None
-		H_img = None
-		D_img = None
-		H_combined_mask = None
-		D_combined_mask = None
-		cropped_image = None
-		stain_mask = None
-
-		if contours:
-			# Find the bounding box around the non-background region in the predicted mask
-			x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
-
-			# Crop the original image based on the scaled bounding box
-			#cropped_image = extracted_area[y_original:y_original + h_original, x_original:x_original + w_original]
-			#cropped_image = img[y_original:y_original + h_original, x_original:x_original + w_original]
-			cropped_image_H = extracted_area[y:y + h, x:x + w]
-
-
-
-			# cv2.imshow('Loaded Image', cropped_image_H)
-			# cv2.waitKey(0)
-			# cv2.destroyAllWindows()
-
-			if self.main_model == 'cellpose':
-				#H_masks, H_flows, H_styles, H_diams = model.eval(H_img, diameter=None, channels=self.model_channels)
-				H_masks, _, _, _ = model.eval(cropped_image_H, diameter=None, channels=self.model_channels)
-				#D_masks, D_flows, D_styles, D_diams = model.eval(D_img, diameter=None, channels=self.model_channels)
-				D_masks = H_masks
-
-			elif self.main_model == 'stardist':
-				H_masks, H_details = model.predict_instances(normalize(H_img_EQ))
-				D_masks, D_details = model.predict_instances(normalize(D_img_EQ))
-
-			elif self.main_model == 'staining':
-				# Create Stain Mask
-				# Load numpy cell seg mask to crop it and create seperate staining
-				mask_cell_path = os.path.join(self.masks_ihc_cells_path, mask_filename)
-				loaded_array = np.load(mask_cell_path)
-				# Access the array using the key specified during saving (in this case, 'mask')
-				mask = loaded_array['mask']
-
-				mask_cropped = mask[y:y + h, x:x + w]
-				stain_mask = self.create_stain_mask(H, D, mask_cropped)
-
-				H_img = H_img_EQ
-				D_img = D_img_EQ
-
-				H_masks = H_img
-				D_masks = D_img
-
-			# Create an empty mask and place the resized predicted mask at its original position
-			H_combined_mask = np.zeros_like(H_img_EQ[:, :, 0], dtype=np.uint8)
-			#D_combined_mask = np.zeros_like(img[:, :, 0], dtype=np.uint8)
-
-			# Ensure the dimensions match before assignment
-			h_resized, w_resized = H_masks.shape
-			H_combined_mask[y:y + h_resized, x:x + w_resized] = H_masks
-
-			# # Ensure the dimensions match before assignment
-			# h_resized, w_resized = D_masks.shape
-			# D_combined_mask[y:y + h_resized, x:x + w_resized] = D_masks
-
-		return H, D, H_img, D_img, H_combined_mask, D_combined_mask, cropped_image, stain_mask
-
-	def load_last_processed_id(self, filename):
-		try:
-			with open(filename, 'r') as file:
-				return int(file.read().strip())
-		except (FileNotFoundError, ValueError):
-			return 0
-
-	def save_last_processed_id(self, last_processed_id, filename):
-		with open(filename, 'w') as file:
-			file.write(str(last_processed_id))
-
-	def main(self, id_value):
-		if self.main_model == 'cellpose':
-			# Initialize cellpose model
-			model = models.Cellpose(gpu=self.gpu_usage, model_type=self.model_type)
-		elif self.main_model == 'stardist':
-			from stardist.models import StarDist2D
-			from stardist.data import test_image_nuclei_2d
-			from stardist.plot import render_label
-			from csbdeep.utils import normalize
-
-			# prints a list of available models
-			StarDist2D.from_pretrained()
-
-			# Define a pretrained model to segment nuclei in fluorescence images (download from pretrained)
-			model = StarDist2D.from_pretrained('2D_versatile_fluo')
-		elif self.main_model == 'staining':
-			model = None
-
-		# Function to convert the file name to the required URL format
-		def convert_to_url(file_name):
-			first_part, rest = file_name.split("-", 1)  # Split on the first dash
-			url = f"http://images.proteinatlas.org/{first_part}/{rest}.jpg"
-			return url
-
-		# Function to read missing file names from the text file
-		def load_missing_files(file_path):
-			with open(file_path, 'r') as file:
-				missing_files = [line.strip() for line in file.readlines()]
-			return missing_files
-
-		missing_files = load_missing_files(missing_files_path)
-
-		# Convert missing file names to URLs
-		missing_urls = {convert_to_url(file) for file in missing_files}
-
-		#filename = f'last_processed_id_{id_value}.txt' if id_value else 'last_processed_id.txt'
-
-		conn = sqlite3.connect(self.database_path)
-		cur = conn.cursor()
-
-		#last_processed_id = self.load_last_processed_id(filename)
-
-		cur.execute("SELECT mainID, name, url FROM elGenes WHERE url IN ({})".format(
-		','.join('?' for _ in missing_urls)))
-		# Execute the query with the missing URLs
-		cur.execute(query, list(missing_urls))
-		rows = cur.fetchall()
-		conn.close()
-
-		all_image_url = []
-		for row in rows:
-			mainID, name, url = row
-			print(name)
-			all_image_url.append((mainID, name, url))
-		# Processing images
-		skipped_images = []
-		renamed_files = []
-		for mainID, name, url in all_image_url:
-			try:
-				print(mainID,'mainID')
-				# specific image
-				# if name != 'TP63':
-				# 	continue
-
-
-				# mask
-				mask_filename = url.split('/')[-2] + '-' + url.split('/')[-1]
-				mask_filename = mask_filename.split('.')[0]
-				mask_path = f'data/masks_IHC/{mask_filename}.npz'
-				print(mask_path)
-				loaded_array = np.load(mask_path)
-				# Access the array using the key specified during saving (in this case, 'mask')
-				mask = loaded_array['mask']
-
-				'''CARE: download_H_img_EQ is a workaround, be aware of current status'''
-				download_H_img_EQ = False
-
-				if download_H_img_EQ:	# if Internet Connection is possible (outside of Cluster)
-					req = urllib.request.urlopen(url)
-					arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
-					ihc_img = cv2.imdecode(arr, -1)
-					input_image = cv2.cvtColor(ihc_img, cv2.COLOR_BGR2RGB)
-
-					self.download_H_img_EQ(input_image, mask, mask_filename)
-
-				else:
-					H_img_EQ_path = f'data/images_H_img_EQ/{mask_filename}.png'
-					#print(H_img_path, 'H_img_Path')
-					input_image = cv2.imread(H_img_EQ_path)
-
-
-					H, D, H_img, D_img, H_combined_mask, D_combined_mask, \
-					cropped_image, stain_mask = self.crop_image(input_image, mask, model, mask_filename)
-
-					# Predict mask
-					if self.main_model != 'staining':
-						# Save the generated mask as a numpy array
-						np.savez_compressed(self.masks_ihc_cells_path + '/' + mask_filename + '.npz', mask=H_combined_mask)
-
-						plt.imshow(H_combined_mask)  # Verwende 'gray' für Graustufen-Darstellung
-						plt.title('H Combined Mask')
-						plt.axis('off')  # Deaktiviere die Achsen, um das Bild besser darzustellen
-						plt.show()
-
-						#plt.show()
-
-					# Speichere die letzte verarbeitete ID
-					last_processed_id = mainID
-					self.save_last_processed_id(last_processed_id, filename)
-
-
-			except Exception as e:
-				print(f"Error processing {name}: {e}")
-				skipped_images.append((mainID, url))
-
-		# Save skipped images to a text file
-		if skipped_images:
-			with open('skipped_images.txt', 'w') as f:
-				for mainID, url in skipped_images:
-					f.write(f"MainID: {mainID}, URL: {url}\n")
-
-		# Save renamed files to a text file
-		if renamed_files:
-			with open('renamed_files.txt', 'w') as f:
-				for mainID, url in renamed_files:
-					f.write(f"MainID: {mainID}, URL: {url}\n")
-
-			# # Further Analysis
-			# D_props = regionprops_table(D_combined_mask, D_img,
-			# 							properties=['label',
-			# 										'area', 'equivalent_diameter',
-			# 										'mean_intensity', 'solidity'])
-			#
-			# D_analysis_results = pd.DataFrame(D_props)
-			# print(D_analysis_results.head())
-			#
-			# H_props = regionprops_table(H_combined_mask, H_img,
-			# 							properties=['label',
-			# 										'area', 'equivalent_diameter',
-			# 										'mean_intensity', 'solidity'])
-			#
-			# H_analysis_results = pd.DataFrame(H_props)
-			# print(H_analysis_results.head())
-			#
-			# D_mean_analysis_results = D_analysis_results.mean(axis=0)
-			# D_mean_analysis_results
-			#
-			# H_mean_analysis_results = H_analysis_results.mean(axis=0)
-			# H_mean_analysis_results
-			#
-			# D_total_area = D_analysis_results["area"].sum()
-			# H_total_area = H_analysis_results["area"].sum()
-			# positivity = D_total_area / (D_total_area + H_total_area)
-			# print("The DAB positivity is: ", positivity)
-
+from datetime import datetime
+
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+
+from skimage.color import rgb2hed, hed2rgb
+from skimage import img_as_ubyte
+
+from cellpose import models
+
+from .. import config_helper
+
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+def load_last_processed_id(path: str) -> int:
+    try:
+        with open(path, "r") as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return 0
+
+
+def save_last_processed_id(path: str, value: int) -> None:
+    with open(path, "w") as f:
+        f.write(str(value))
+
+
+def download_image(url: str) -> np.ndarray:
+    with urllib.request.urlopen(url) as r:
+        arr = np.asarray(bytearray(r.read()), dtype=np.uint8)
+    img = cv2.imdecode(arr, -1)
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+
+# -----------------------------------------------------------------------------
+# Pipeline
+# -----------------------------------------------------------------------------
+
+class IHC_Cellpose:
+    """
+    Cellpose-based IHC cell segmentation pipeline.
+    """
+
+    def __init__(self, config: dict, version: str, masks_ihc_path: str):
+        self.config = config
+        self.version = version
+        self.masks_ihc_path = masks_ihc_path
+
+        data_root = config["paths"]["data_root"]
+
+        # Versioned outputs
+        self.output_root = os.path.join(data_root, version, "cellpose")
+        self.masks_out = os.path.join(self.output_root, "outputs_masks")
+        self.vis_out = os.path.join(self.output_root, "outputs_visualization")
+
+        os.makedirs(self.masks_out, exist_ok=True)
+        os.makedirs(self.vis_out, exist_ok=True)
+
+        self.last_id_file = os.path.join(
+            self.output_root, "last_processed_id.txt"
+        )
+
+        self.db_path = config["paths"]["database_path"]
+
+        # Cellpose model
+        self.model = models.Cellpose(
+            gpu=True,
+            model_type="cyto2"
+        )
+        self.channels = [0, 0]
+
+        self.run_metadata_path = os.path.join(
+            self.output_root, "run_metadata.json"
+        )
+
+        self.run_metadata = {
+            "pipeline": "IHC_Cellpose",
+            "version": self.version,
+            "created_at": datetime.now().isoformat(),
+
+            # Environment
+            #"user": getpass.getuser(),
+            #"hostname": socket.gethostname(),
+
+            # Inputs
+            "masks_ihc_path": self.masks_ihc_path,
+            "database_path": self.db_path,
+
+            # Model
+            "model": {
+                "framework": "cellpose",
+                "model_type": "cyto2",
+                "gpu": True,
+                "channels": self.channels,
+                "diameter": None
+            },
+
+            # Preprocessing summary
+            "preprocessing": [
+                "RGB → HED",
+                "hematoxylin extraction",
+                "invert",
+                "histogram equalization",
+                "epidermis-only masking",
+                "crop to tissue"
+            ],
+
+            # Outputs
+            "outputs": {
+                "output_root": self.output_root,
+                "masks_out": self.masks_out,
+                "visualizations_out": self.vis_out
+            },
+
+            # Config provenance
+            "config": {
+                "paths": self.config.get("paths", {}),
+                #"hash": hash_dict(self.config)
+            },
+
+            # Runtime stats
+            "stats": {
+                "processed": 0,
+                "failed": 0
+            }
+        }
+
+        with open(self.run_metadata_path, "w") as f:
+            json.dump(self.run_metadata, f, indent=2)
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def extract_epidermis(image: np.ndarray, tissue_mask: np.ndarray) -> np.ndarray:
+        """
+        Return an image where only the epidermis (mask==2) is kept,
+        and all other pixels are white.
+        """
+        epidermis_only = np.copy(image)
+        epidermis_only[tissue_mask != 2] = 255  # white-out non-epidermis
+        return epidermis_only
+
+    @staticmethod
+    def crop_to_tissue(image: np.ndarray, tissue_mask: np.ndarray):
+        """
+        Crop the image to the bounding box of the tissue (mask==2, epidermis).
+        Returns the cropped image and bounding box (x, y, w, h).
+        """
+        mask = (tissue_mask == 2).astype(np.uint8)  # epidermis only
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if not contours:
+            return None, None
+
+        x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
+        return image[y:y + h, x:x + w], (x, y, w, h)
+
+    @staticmethod
+    def prepare_H_channel(epidermis_rgb: np.ndarray, return_raw: bool = False):
+        """
+        Prepare the Hematoxylin (H) channel for model input.
+        Returns both the raw H channel (after hed2rgb) and the final H_eq.
+        """
+        # Convert RGB to HED
+        hed = rgb2hed(epidermis_rgb)
+
+        # Hematoxylin channel (old pipeline uses channel 0)
+        null = np.zeros_like(hed[:, :, 0])
+        H_rgb_like = hed2rgb(np.stack((hed[:, :, 0], null, null), axis=-1))
+
+        # Convert to 0-255 ubyte
+        H = img_as_ubyte(H_rgb_like)
+
+        # Take single channel for inversion + equalization
+        H_gray = H[:, :, 0]  # channel 0 matches old pipeline
+        H_inv = np.invert(H_gray)
+        H_eq = cv2.equalizeHist(H_inv)
+
+        if return_raw:
+            return H_gray, H_eq
+        else:
+            return H_eq
+
+    # -------------------------------------------------------------------------
+
+    def save_visualization(
+            self, original, tissue_mask, cropped, epidermis_only,
+            H_raw, H_eq, masks, overlay_name, gene_name, mainID, mask_base
+    ):
+        """
+        Save multi-panel figure including:
+        - HED separation and final H channel
+        """
+        plt.figure(figsize=(24, 4))
+        plt.suptitle(f"{gene_name} | ID: {mainID}", fontsize=16)
+
+        overlay = original.copy()
+        overlay[masks > 0] = [255, 0, 0]  # red overlay
+
+        panels = [original, tissue_mask, cropped, epidermis_only, H_raw, H_eq, masks, overlay]
+        titles = [
+            "Original Image", "Tissue Mask", "Cropped Tissue",
+            "Epidermis Only", "H Channel (raw)", "H Channel EQ",
+            "Predicted Mask", "Overlay Mask"
+        ]
+
+        for i, panel in enumerate(panels):
+            plt.subplot(1, len(panels), i + 1)
+            plt.title(titles[i])
+            if panel.ndim == 2:
+                plt.imshow(panel, cmap="gray")
+            else:
+                plt.imshow(panel)
+            plt.axis("off")
+
+        os.makedirs(self.vis_out, exist_ok=True)
+        plt.savefig(
+            os.path.join(self.vis_out, f"{mask_base}.png"),
+            dpi=200,
+            bbox_inches="tight"
+        )
+        plt.close()
+
+    def process_row(self, main_id: int, name: str, url: str):
+        print(f"[{main_id}] {name}")
+
+        mask_base = f"{url.split('/')[-2]}-{url.split('/')[-1].split('.')[0]}"
+        mask_path = os.path.join(self.masks_ihc_path, f"{mask_base}.npz")
+
+        if not os.path.exists(mask_path):
+            raise FileNotFoundError(f"Missing IHC mask: {mask_path}")
+
+        tissue_mask = np.load(mask_path)["mask"]
+
+        image = download_image(url)
+
+        cropped, bbox = self.crop_to_tissue(image, tissue_mask)
+        if cropped is None:
+            raise RuntimeError("No tissue region detected")
+
+        # Extract epidermis from cropped tissue
+        x, y, w, h = bbox
+        tissue_crop_mask = tissue_mask[y:y + h, x:x + w]
+        epidermis_only = self.extract_epidermis(cropped, tissue_crop_mask)
+
+        # Prepare H channel
+        # We'll split into raw H (after hed2rgb) and final H_eq
+        H_raw, H_eq = self.prepare_H_channel(epidermis_only, return_raw=True)
+
+        # Model prediction
+        masks, _, _, _ = self.model.eval(
+            H_eq,
+            diameter=None,
+            channels=[0, 0]
+        )
+
+        full_mask = np.zeros(image.shape[:2], dtype=np.uint16)
+        full_mask[y:y + h, x:x + w] = masks
+
+        np.savez_compressed(
+            os.path.join(self.masks_out, f"{mask_base}.npz"),
+            mask=full_mask,
+            crop_bbox=bbox
+
+        )
+
+        # Save visualization
+        self.save_visualization(
+            original=image,
+            tissue_mask=tissue_crop_mask,
+            cropped=cropped,
+            epidermis_only=epidermis_only,
+            H_raw=H_raw,
+            H_eq=H_eq,
+            masks=full_mask,
+            overlay_name=None,  # optional
+            gene_name=name,
+            mainID=main_id,
+            mask_base=mask_base
+        )
+
+    # -------------------------------------------------------------------------
+
+    def run(self):
+        last_id = load_last_processed_id(self.last_id_file)
+
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT mainID, name, url FROM elGenes "
+            "WHERE mainID > ? ORDER BY mainID",
+            (last_id,)
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        for main_id, name, url in rows:
+            try:
+                self.process_row(main_id, name, url)
+                save_last_processed_id(self.last_id_file, main_id)
+                self.run_metadata["stats"]["processed"] += 1
+            except Exception as e:
+                self.run_metadata["stats"]["failed"] += 1
+                print(f"[ERROR] {name}: {e}")
+
+        self.run_metadata["finished_at"] = datetime.now().isoformat()
+        self.run_metadata["last_processed_id"] = (
+            rows[-1][0] if rows else last_id
+        )
+
+        with open(self.run_metadata_path, "w") as f:
+            json.dump(self.run_metadata, f, indent=2)
+
+
+# -----------------------------------------------------------------------------
+# CLI entrypoint (module-safe)
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser()
-	args = parser.parse_args()
-	with open(r'environment/environment_variables.txt', 'r') as f:
-		args.__dict__ = json.load(f)
-	# General settings
-	parser.add_argument("--database_path", default=os.getcwd() + args.database_path)
-	parser.add_argument("--images_ihc_path", default=os.getcwd() + args.images_ihc_path)
-	parser.add_argument("--masks_ihc_path", default=os.getcwd() + args.masks_ihc_path)
-	parser.add_argument("--masks_ihc_cells_path", default=os.getcwd() + args.masks_ihc_cells_path)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    base_cfg = os.path.join(PROJECT_ROOT, "config", "base_config.yaml")
+    pred_cfg = os.path.join(PROJECT_ROOT, "config", "prediction_config.yaml")
 
-	parser.add_argument("--model_path", default=os.getcwd() + args.model_path)
+    config = config_helper.ConfigLoader.load_config(base_cfg, pred_cfg)
 
-	parser.add_argument("--id_value", default=0, type=int, help="Select mainID (for example: 20000, 30000)")
+    parser = argparse.ArgumentParser("IHC Cellpose segmentation")
+    parser.add_argument(
+        "--version",
+        required=True,
+        help="Dataset / model version (e.g. v001)"
+    )
+    parser.add_argument(
+        "--masks_ihc_path",
+        required=True,
+        help="Path to IHC tissue masks (.npz) from prediction pipeline"
+    )
 
-	args = parser.parse_args()
-	processing = cellpose(args)
+    args = parser.parse_args()
 
-	processing.main(args.id_value)
+    pipeline = IHC_Cellpose(
+        config=config,
+        version=args.version,
+        masks_ihc_path=args.masks_ihc_path
+    )
+    pipeline.run()

@@ -2,7 +2,4 @@ include: base_config.yaml
 
 paths:
   database_path: "${paths.resources}/final.db"
-  images_ihc_path: "${paths.data_root}/images_IHC"
-  masks_ihc_path: "${paths.data_root}/masks_IHC"
-  masks_ihc_cells_path: "${paths.data_root}/masks_IHC_cells"
-  model_path: "${paths.models}"
+
