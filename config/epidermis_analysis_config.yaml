@@ -2,4 +2,10 @@ include: base_config.yaml
 
 paths:
   database_path: "${paths.resources}/final.db"
+  # Paths for epidermis analysis
+  # Input for ihc_cellpose.py and cell_layers_database.py
+  masks_ihc: "${paths.data_root}/v001/predictions/resnet152_epoch63_val0.1902_cont/outputs_masks/corrected_masks"
+  
+  # Input for cell_layers_database.py
+  masks_cells: "${paths.data_root}/v001/cellpose/outputs_masks"
 

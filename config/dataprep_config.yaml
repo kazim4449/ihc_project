@@ -1,7 +1,6 @@
 
 paths:
   roi_images_path: "${paths.processed_data}/images_HnE"
-  inv_images_path: "${paths.processed_data}/images_inv"
   roi_xy_path: "${paths.processed_data}/roi_xy"
   ihc_path: "${paths.processed_data}/images_IHC"
   masks_path: "${paths.processed_data}/masks"
@@ -9,7 +8,6 @@ paths:
   arrow_left: "${paths.environment_assets}/arrow_left.png"
   logo: "${paths.environment_assets}/logo.png"
   file_path: ""
-  #save_path: "transition_image.png"
 
 colors:
   base_bg: "#ffffff"       # white background base color

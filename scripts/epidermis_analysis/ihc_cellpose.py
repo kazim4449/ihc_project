@@ -58,12 +58,14 @@ class IHC_Cellpose:
     Cellpose-based IHC cell segmentation pipeline.
     """
 
-    def __init__(self, config: dict, version: str, masks_ihc_path: str):
+    def __init__(self, config: dict, version: str):
         self.config = config
         self.version = version
-        self.masks_ihc_path = masks_ihc_path
 
         data_root = config["paths"]["data_root"]
+
+        # Input
+        self.masks_ihc_path = config["paths"]["masks_ihc"]
 
         # Versioned outputs
         self.output_root = os.path.join(data_root, version, "cellpose")
@@ -336,9 +338,9 @@ class IHC_Cellpose:
 if __name__ == "__main__":
     PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     base_cfg = os.path.join(PROJECT_ROOT, "config", "base_config.yaml")
-    pred_cfg = os.path.join(PROJECT_ROOT, "config", "prediction_config.yaml")
+    epi_cfg = os.path.join(PROJECT_ROOT, "config", "epidermis_analysis_config.yaml")
 
-    config = config_helper.ConfigLoader.load_config(base_cfg, pred_cfg)
+    config = config_helper.ConfigLoader.load_config(base_cfg, epi_cfg)
 
     parser = argparse.ArgumentParser("IHC Cellpose segmentation")
     parser.add_argument(
@@ -346,17 +348,11 @@ if __name__ == "__main__":
         required=True,
         help="Dataset / model version (e.g. v001)"
     )
-    parser.add_argument(
-        "--masks_ihc_path",
-        required=True,
-        help="Path to IHC tissue masks (.npz) from prediction pipeline"
-    )
 
     args = parser.parse_args()
 
     pipeline = IHC_Cellpose(
         config=config,
         version=args.version,
-        masks_ihc_path=args.masks_ihc_path
     )
     pipeline.run()

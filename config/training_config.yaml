@@ -1,12 +1,5 @@
 include: base_config.yaml
 
-#paths:
-  #train_images_path: "${paths.training_data}/images/train"
-  #train_masks_path: "${paths.training_data}/masks/train"
-  #test_images_path: "${paths.training_data}/images/test"
-  #test_masks_path: "${paths.training_data}/masks/test"
-  #model_path: "${paths.models}"
-
 training_params:
   BACKBONE: ["resnet34", "resnet152"]
   model_type: "resnet152"

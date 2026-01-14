@@ -2,15 +2,6 @@ include: base_config.yaml
 
 paths:
   database_path: "${paths.resources}/final.db"
-  #last_processed_id: "${paths.prediction_data}/last_processed_id.txt"
-  
-  #predict_images_path: "${paths.prediction_data}/images"
-  
-  # Output folders
-  #outputs_masks: "${paths.prediction_data}/masks"    
-  #outputs_visualization: "${paths.prediction_data}/visualizations" 
-  
-  #model_path: "${paths.models}"
 
 training_params:
   BACKBONE: ["resnet34", "resnet152"]

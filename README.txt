@@ -8,7 +8,9 @@ Project structure:
 │   ├── processed/
 │   ├── v001/
 │   │   ├── training/
-│   │   └── predictions/  
+│   │   ├── predictions/  
+│   │   ├── cellpose/
+│   │   └── layer_analysis/
 │
 ├── config/
 │   ├── README.md
@@ -23,9 +25,9 @@ Project structure:
 │   ├── assets/
 │        └── ...
 │   ├── requirements.txt          
-│   ├── Dockerfile            
-│   └── .env                  
-│   └── entrypoint.sh           
+###│   ├── Dockerfile            
+###│   └── .env                  
+###│   └── entrypoint.sh           
 │
 ├── resources/
 │   ├── final.db
@@ -77,4 +79,47 @@ py -m scripts.training.train --version v001 --optuna
 py -m scripts.training.train --version v001 --optuna-load
 py -m scripts.training.train --version v001 --optuna-load --continue-training
 
+
+#--linux
+# prediction
+python3 -m scripts.prediction.whole_slide_prediction \
+  --version v001 \
+  --model /mnt/c/Users/kfayd01/Downloads/resnet152_epoch63_val0.1902_cont.keras \
+  --mode database 	# Choice between 'database' and 'folder'
+  --input_folder … 	# Needed if mode is 'folder'
+
+
+# cellpose
+python3 -m scripts.epidermis_analysis.ihc_cellpose \
+  --version v001 
+
+# layers analysis
+python3 -m scripts.epidermis_analysis.cell_layers_database \
+  --version v001 \
+  --gene TP63		# Optional, to filter for gene
+
+
+
+
+---
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## Citation
+
+If you use this code in your research, please cite:
+
+**Name**, Contributor Name, *Title of Paper*, Journal/Conference, Year. [DOI or preprint link if available]
+
+---
+
+## Acknowledgements
+
+Thanks to **Contributor Name** for testing and feedback on the code.  
+
+---
 

@@ -5,7 +5,6 @@ paths:
   environment_assets: "./environment/assets"
   resources: "./resources"   # for db/tsv/etc
   models: "./models"
-  #outputs: "./outputs"
 
 colors:
   fg: "white"
