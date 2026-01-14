@@ -86,5 +86,3 @@ The HPA database construction (`build_hpa_database.py`) is independent and not d
 A deep learning–based semantic segmentation model was trained using a ResNet-backed U-Net architecture. Cropped H&E images and corresponding mask labels were generated using a semi-automated preprocessing pipeline. RGB mask labels were converted to integer class indices, and on-the-fly data augmentation was applied to improve generalization.
 
 The model was trained using a combination of Dice and Focal loss functions with the Adam optimizer. Training included experiment versioning, optional hyperparameter optimization, and comprehensive logging of model checkpoints, training curves, and performance metrics. This pipeline enables reproducible training and evaluation of multi-class tissue segmentation models.
-
-Here is a **fully updated Markdown section** that captures *all* the technical detail, structure, and publication wording from your Word document, while staying consistent with Sections 1–3.

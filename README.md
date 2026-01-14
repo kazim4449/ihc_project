@@ -194,8 +194,6 @@ Detailed documentation for each module is available in the `docs/` directory:
 * `docs/whole_slide_inference.md`
 * `docs/cell_segmentation.md`
 
-Publication-ready Methods text is provided in `docs/methods.md`.
-
 ---
 ## License
 

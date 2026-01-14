@@ -115,6 +115,3 @@ Corrected full-resolution masks
 Whole-slide and large immunohistochemistry (IHC) images were segmented using a custom inference-only deep learning pipeline. A pre-trained ResNet-based U-Net model was applied to downsampled images to obtain an initial coarse segmentation. Predicted masks were post-processed to retain biologically meaningful connected tissue regions, preserve mixed epidermis–keratin components, and suppress small spurious predictions.
 
 Dominant predicted tissue regions were automatically identified, mapped back to full image resolution, cropped, and re-segmented to improve boundary accuracy. The refined predictions were reintegrated into full-resolution masks. Images were processed either directly from URLs stored in a local Human Protein Atlas (HPA) SQLite database or from local folders for testing and validation. All outputs were stored in a versioned directory structure linked to the specific model used, ensuring reproducible large-scale inference.
-
-
-Here is an **updated, fully aligned Markdown section** that incorporates all details from your Word document while staying consistent with Sections 1–4 in tone, structure, and publication readiness.

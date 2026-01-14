@@ -63,7 +63,3 @@ A local Human Protein Atlas (HPA) database was constructed using a custom Python
 The XML files were parsed programmatically to extract expression levels, cell-type-specific staining characteristics, and image–patient mappings, with a focus on skin tissue. Missing or incomplete fields were handled gracefully to maintain data integrity, and duplicate entries were filtered. All unique records were stored in a local SQLite database (`final.db`) in a table representing gene–antibody–tissue–image associations.
 
 A progress indicator was included to provide real-time feedback during database construction. This pipeline enables automated, reproducible assembly of HPA data for downstream analysis of tissue-specific protein expression and immunohistochemistry experiments.
-
-
-Here is an **updated and expanded Markdown section** that fully reflects the Word document, keeps consistency with Sections 1–2, and is suitable for README + Methods documentation.
-
