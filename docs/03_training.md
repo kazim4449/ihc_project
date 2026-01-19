@@ -50,8 +50,8 @@ The `train.py` script implements a complete deep learning pipeline for tissue se
 ```bash
 --version               experiment identifier
 --optuna                run hyperparameter optimization
---optuna-load           continue Optuna study
---continue-training     resume training from checkpoint
+--optuna-load           load the best hyperparameters from a previous Optuna run and train the model using them
+--continue-training     continue training a model, doesn’t have to be from a checkpoint — it could be an existing pre-trained model, previous run, or any saved model
 ````
 
 ---

@@ -99,27 +99,3 @@ python3 -m scripts.epidermis_analysis.cell_layers_database \
   --gene TP63		# Optional, to filter for gene
 
 
-
-
----
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-## Citation
-
-If you use this code in your research, please cite:
-
-**Name**, Contributor Name, *Title of Paper*, Journal/Conference, Year. [DOI or preprint link if available]
-
----
-
-## Acknowledgements
-
-Thanks to **Contributor Name** for testing and feedback on the code.  
-
----
-

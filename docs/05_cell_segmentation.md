@@ -90,7 +90,7 @@ Pipeline parameters are loaded from:
 #### Integration Flow
 
 ```plaintext
-data_preprocessing.py
+data_preprocessing scripts
        │
        ▼
 Cropped H&E / mask / IHC images

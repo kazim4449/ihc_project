@@ -42,7 +42,7 @@ flowchart TD
 * Semi-automated ROI extraction from H&E, mask, and IHC images
 * Manual GUI + reproducible batch cropping
 
-📄 *Details:* `docs/image_cropping.md`
+📄 *Details:* `docs/01_image_cropping.md`
 
 ---
 
@@ -53,7 +53,7 @@ flowchart TD
 * Builds a local SQLite database from HPA TSV + XML files
 * Extracts skin-specific expression, IHC images, and metadata
 
-📄 *Details:* `docs/hpa_database.md`
+📄 *Details:* `docs/02_hpa_database.md`
 
 ---
 
@@ -64,7 +64,7 @@ flowchart TD
 * ResNet-based U-Net for epidermis/keratin segmentation
 * Data augmentation, Dice + Focal loss, Optuna support
 
-📄 *Details:* `docs/training.md`
+📄 *Details:* `docs/03_training.md`
 
 ---
 
@@ -75,7 +75,7 @@ flowchart TD
 * Coarse-to-fine inference on large IHC images
 * Region refinement and biologically informed post-processing
 
-📄 *Details:* `docs/whole_slide_inference.md`
+📄 *Details:* `docs/04_whole_slide_inference.md`
 
 ---
 
@@ -86,7 +86,7 @@ flowchart TD
 * Cellpose-based segmentation within epidermal regions
 * Color deconvolution + full-resolution cell masks
 
-📄 *Details:* `docs/cell_segmentation.md`
+📄 *Details:* `docs/05_cell_segmentation.md`
 
 ---
 
@@ -188,11 +188,11 @@ python -m scripts.epidermis_analysis.ihc_cellpose \
 
 Detailed documentation for each module is available in the `docs/` directory:
 
-* `docs/image_cropping.md`
-* `docs/hpa_database.md`
-* `docs/training.md`
-* `docs/whole_slide_inference.md`
-* `docs/cell_segmentation.md`
+* `docs/01_image_cropping.md`
+* `docs/02_hpa_database.md`
+* `docs/03_training.md`
+* `docs/04_whole_slide_inference.md`
+* `docs/05_cell_segmentation.md`
 
 ---
 ## License

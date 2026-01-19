@@ -77,7 +77,7 @@ These files define paths, database locations, and model-related parameters.
 #### Integration Flow
 
 ```plaintext
-data_preprocessing.py
+data_preprocessing scripts
        │
        ▼
 Cropped H&E / mask data
